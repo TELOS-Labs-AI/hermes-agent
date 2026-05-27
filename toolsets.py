@@ -221,6 +221,12 @@ TOOLSETS = {
         "tools": ["session_search"],
         "includes": []
     },
+
+    "telos_recall": {
+        "description": "Opt-in TELOS canonical recall over local canonical sources",
+        "tools": ["telos_recall"],
+        "includes": []
+    },
     
     "clarify": {
         "description": "Ask the user clarifying questions (multiple-choice or open-ended)",

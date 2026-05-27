@@ -2799,6 +2799,8 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
                         repaired["required"] = valid
                     else:
                         repaired.pop("required", None)
+            elif "required" in repaired:
+                repaired.pop("required", None)
 
         return repaired
 

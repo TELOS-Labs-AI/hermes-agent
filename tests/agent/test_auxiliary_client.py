@@ -2326,6 +2326,66 @@ class TestCodexAdapterReasoningTranslation:
         assert "reasoning" not in captured
         assert "include" not in captured
 
+    def test_synthesizes_text_when_terminal_output_is_null(self):
+        events = [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.output_text.delta", delta="Bus "),
+            SimpleNamespace(type="response.output_text.delta", delta="Check"),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(status="completed", output=None, usage=None),
+            ),
+        ]
+
+        class FakeCreateStream:
+            def __iter__(self):
+                return iter(events)
+
+            def close(self):
+                pass
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                assert kwargs.get("stream") is True
+                return FakeCreateStream()
+
+        adapter = _CodexCompletionsAdapter(
+            SimpleNamespace(responses=FakeResponses()),
+            "gpt-5.5",
+        )
+
+        response = adapter.create(messages=[{"role": "user", "content": "title"}])
+
+        assert response.choices[0].message.content == "Bus Check"
+
+    def test_synthesizes_text_when_stream_ends_after_text_deltas(self):
+        events = [
+            SimpleNamespace(type="response.created"),
+            SimpleNamespace(type="response.output_text.delta", delta="Vale "),
+            SimpleNamespace(type="response.output_text.delta", delta="Status"),
+        ]
+
+        class FakeCreateStream:
+            def __iter__(self):
+                return iter(events)
+
+            def close(self):
+                pass
+
+        class FakeResponses:
+            def create(self, **kwargs):
+                assert kwargs.get("stream") is True
+                return FakeCreateStream()
+
+        adapter = _CodexCompletionsAdapter(
+            SimpleNamespace(responses=FakeResponses()),
+            "gpt-5.5",
+        )
+
+        response = adapter.create(messages=[{"role": "user", "content": "title"}])
+
+        assert response.choices[0].message.content == "Vale Status"
+
     def test_extra_body_without_reasoning_key_is_noop(self):
         adapter, captured = self._build_adapter()
         adapter.create(

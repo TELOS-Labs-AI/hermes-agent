@@ -365,7 +365,6 @@ def format_tools_for_system_message(agent: Any) -> str:
             "name": func["name"],
             "description": func.get("description", ""),
             "parameters": func.get("parameters", {}),
-            "required": None  # Match the format in the example
         }
         formatted_tools.append(formatted_tool)
 
