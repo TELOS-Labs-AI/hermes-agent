@@ -2131,6 +2131,63 @@ class TestCodexAdapterReasoningTranslation:
         assert "reasoning" not in captured
         assert "include" not in captured
 
+    def test_synthesizes_text_when_finalizer_raises_none_iterable(self):
+        class FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def __iter__(self):
+                yield SimpleNamespace(type="response.output_text.delta", delta="Bus ")
+                yield SimpleNamespace(type="response.output_text.delta", delta="Check")
+
+            def get_final_response(self):
+                raise TypeError("'NoneType' object is not iterable")
+
+        class FakeResponses:
+            def stream(self, **kwargs):
+                return FakeStream()
+
+        adapter = _CodexCompletionsAdapter(
+            SimpleNamespace(responses=FakeResponses()),
+            "gpt-5.5",
+        )
+
+        response = adapter.create(messages=[{"role": "user", "content": "title"}])
+
+        assert response.choices[0].message.content == "Bus Check"
+
+    def test_synthesizes_text_when_iterator_raises_none_iterable(self):
+        class FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def __iter__(self):
+                yield SimpleNamespace(type="response.output_text.delta", delta="Vale ")
+                yield SimpleNamespace(type="response.output_text.delta", delta="Status")
+                raise TypeError("'NoneType' object is not iterable")
+
+            def get_final_response(self):
+                raise AssertionError("iterator failure should skip final response")
+
+        class FakeResponses:
+            def stream(self, **kwargs):
+                return FakeStream()
+
+        adapter = _CodexCompletionsAdapter(
+            SimpleNamespace(responses=FakeResponses()),
+            "gpt-5.5",
+        )
+
+        response = adapter.create(messages=[{"role": "user", "content": "title"}])
+
+        assert response.choices[0].message.content == "Vale Status"
+
     def test_extra_body_without_reasoning_key_is_noop(self):
         adapter, captured = self._build_adapter()
         adapter.create(

@@ -187,6 +187,26 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
     # returns empty output (e.g. chatgpt.com backend-api sends
     # response.incomplete instead of response.completed).
     agent._codex_streamed_text_parts: list = []
+
+    def _synthesize_stream_response(collected_output_items: list):
+        if collected_output_items:
+            output = list(collected_output_items)
+        elif agent._codex_streamed_text_parts and not has_tool_calls:
+            assembled = "".join(agent._codex_streamed_text_parts)
+            output = [SimpleNamespace(
+                type="message",
+                role="assistant",
+                status="completed",
+                content=[SimpleNamespace(type="output_text", text=assembled)],
+            )]
+        else:
+            return None
+        return SimpleNamespace(
+            output=output,
+            status="completed",
+            model=api_kwargs.get("model"),
+        )
+
     for attempt in range(max_stream_retries + 1):
         if agent._interrupt_requested:
             raise InterruptedError("Agent interrupted before Codex stream retry")
@@ -240,7 +260,20 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                             sum(len(p) for p in agent._codex_streamed_text_parts),
                             agent._client_log_context(),
                         )
-                final_response = stream.get_final_response()
+                try:
+                    final_response = stream.get_final_response()
+                except TypeError as exc:
+                    if "'NoneType' object is not iterable" not in str(exc):
+                        raise
+                    synthesized = _synthesize_stream_response(collected_output_items)
+                    if synthesized is None:
+                        raise
+                    logger.warning(
+                        "Codex stream finalizer raised NoneType iterable after "
+                        "streaming output; using collected stream content. %s",
+                        agent._client_log_context(),
+                    )
+                    return synthesized
                 # PATCH: ChatGPT Codex backend streams valid output items
                 # but get_final_response() can return an empty output list.
                 # Backfill from collected items or synthesize from deltas.
@@ -281,6 +314,18 @@ def run_codex_stream(agent, api_kwargs: dict, client: Any = None, on_first_delta
                 exc,
             )
             return agent._run_codex_create_stream_fallback(api_kwargs, client=active_client)
+        except TypeError as exc:
+            if "'NoneType' object is not iterable" not in str(exc):
+                raise
+            synthesized = _synthesize_stream_response(collected_output_items)
+            if synthesized is None:
+                raise
+            logger.warning(
+                "Codex stream iterator raised NoneType iterable after "
+                "streaming output; using collected stream content. %s",
+                agent._client_log_context(),
+            )
+            return synthesized
         except RuntimeError as exc:
             err_text = str(exc)
             missing_completed = "response.completed" in err_text

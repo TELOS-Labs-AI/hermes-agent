@@ -784,6 +784,33 @@ class _CodexCompletionsAdapter:
                 # new failure mode for auxiliary calls.
                 pass
 
+        def _recover_from_none_iterable(exc: Exception, output_items: List[Any],
+                                        text_deltas: List[str],
+                                        saw_function_calls: bool) -> Any:
+            if "'NoneType' object is not iterable" not in str(exc):
+                raise exc
+            if output_items:
+                logger.warning(
+                    "Codex auxiliary Responses stream raised NoneType iterable "
+                    "after streaming output; using collected stream items."
+                )
+                return SimpleNamespace(output=list(output_items), usage=None)
+            if text_deltas and not saw_function_calls:
+                assembled = "".join(text_deltas)
+                logger.warning(
+                    "Codex auxiliary Responses stream raised NoneType iterable "
+                    "after streaming text; synthesizing %d chars.",
+                    len(assembled),
+                )
+                return SimpleNamespace(
+                    output=[SimpleNamespace(
+                        type="message", role="assistant", status="completed",
+                        content=[SimpleNamespace(type="output_text", text=assembled)],
+                    )],
+                    usage=None,
+                )
+            raise exc
+
         try:
             # Collect output items and text deltas during streaming —
             # the Codex backend can return empty response.output from
@@ -796,22 +823,38 @@ class _CodexCompletionsAdapter:
                 timeout_timer.daemon = True
                 timeout_timer.start()
             _check_cancelled()
-            with self._client.responses.stream(**resp_kwargs) as stream:
-                for _event in stream:
+            try:
+                with self._client.responses.stream(**resp_kwargs) as stream:
+                    for _event in stream:
+                        _check_cancelled()
+                        _etype = getattr(_event, "type", "")
+                        if _etype == "response.output_item.done":
+                            _done = getattr(_event, "item", None)
+                            if _done is not None:
+                                collected_output_items.append(_done)
+                        elif "output_text.delta" in _etype:
+                            _delta = getattr(_event, "delta", "")
+                            if _delta:
+                                collected_text_deltas.append(_delta)
+                        elif "function_call" in _etype:
+                            has_function_calls = True
                     _check_cancelled()
-                    _etype = getattr(_event, "type", "")
-                    if _etype == "response.output_item.done":
-                        _done = getattr(_event, "item", None)
-                        if _done is not None:
-                            collected_output_items.append(_done)
-                    elif "output_text.delta" in _etype:
-                        _delta = getattr(_event, "delta", "")
-                        if _delta:
-                            collected_text_deltas.append(_delta)
-                    elif "function_call" in _etype:
-                        has_function_calls = True
-                _check_cancelled()
-                final = stream.get_final_response()
+                    try:
+                        final = stream.get_final_response()
+                    except TypeError as exc:
+                        final = _recover_from_none_iterable(
+                            exc,
+                            collected_output_items,
+                            collected_text_deltas,
+                            has_function_calls,
+                        )
+            except TypeError as exc:
+                final = _recover_from_none_iterable(
+                    exc,
+                    collected_output_items,
+                    collected_text_deltas,
+                    has_function_calls,
+                )
 
             # Backfill empty output from collected stream events
             _output = getattr(final, "output", None)

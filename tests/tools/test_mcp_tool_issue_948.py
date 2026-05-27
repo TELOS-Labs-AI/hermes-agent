@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tools.mcp_tool import MCPServerTask, _format_connect_error, _resolve_stdio_command, _MCP_AVAILABLE
+from tools.mcp_tool import (
+    MCPServerTask,
+    _MCP_AVAILABLE,
+    _format_connect_error,
+    _normalize_mcp_input_schema,
+    _resolve_stdio_command,
+)
 
 # Ensure the mcp module symbols exist for patching even when the SDK isn't installed
 if not _MCP_AVAILABLE:
@@ -58,6 +64,39 @@ def test_format_connect_error_unwraps_exception_group():
     message = _format_connect_error(error)
 
     assert "missing executable 'node'" in message
+
+
+def test_normalize_mcp_input_schema_omits_null_required():
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+        },
+        "required": None,
+    }
+
+    normalized = _normalize_mcp_input_schema(schema)
+
+    assert normalized == {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+        },
+    }
+
+
+def test_normalize_mcp_input_schema_preserves_valid_required():
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+        },
+        "required": ["query"],
+    }
+
+    normalized = _normalize_mcp_input_schema(schema)
+
+    assert normalized["required"] == ["query"]
 
 
 def test_run_stdio_uses_resolved_command_and_prepended_path(tmp_path):

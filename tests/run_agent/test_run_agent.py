@@ -1750,6 +1750,7 @@ class TestFormatToolsForSystemMessage:
         parsed = json.loads(result)
         assert len(parsed) == 1
         assert parsed[0]["name"] == "web_search"
+        assert "required" not in parsed[0]
 
     def test_formats_multiple_tools(self, agent):
         agent.tools = _make_tool_defs("web_search", "terminal", "read_file")

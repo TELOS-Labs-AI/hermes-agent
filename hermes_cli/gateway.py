@@ -2807,12 +2807,20 @@ def generate_launchd_plist() -> str:
         dict.fromkeys(priority_dirs + [p for p in os.environ.get("PATH", "").split(":") if p])
     )
 
-    # Build ProgramArguments array, including --profile when using a named profile
-    prog_args = [
+    # Build ProgramArguments array, including --profile when using a named profile.
+    # On the Studio Vale-bound install, launchd enters through a verifier
+    # wrapper that execs this same canonical Hermes gateway command after it
+    # validates the bound Vale artifacts.
+    vale_wrapper = PROJECT_ROOT / "scripts" / "hermes-vale-gateway"
+    use_vale_wrapper = vale_wrapper.exists() and hermes_home == "/Users/jb/.hermes"
+    prog_args = []
+    if use_vale_wrapper:
+        prog_args.append(f"<string>{vale_wrapper}</string>")
+    prog_args.extend([
         f"<string>{python_path}</string>",
         "<string>-m</string>",
         "<string>hermes_cli.main</string>",
-    ]
+    ])
     if profile_arg:
         for part in profile_arg.split():
             prog_args.append(f"<string>{part}</string>")
