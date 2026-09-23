@@ -1,0 +1,6 @@
+name: fleet-capability-registry
+version: "0.1.0"
+description: "TELOS capability manifest loader for governed Hermes skills, tools, and delegated subagents."
+author: TELOS AI Labs
+hooks:
+  - on_session_start

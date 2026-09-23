@@ -1,0 +1,7 @@
+name: telos_passive_scorer
+version: "0.1.0"
+description: "Passive TELOS PA-scoring receipt hook for Hermes tool calls. Opt in with `hermes plugins enable observability/telos_passive_scorer`; missing closed-core scorer falls back to unscored operational receipts."
+author: NousResearch
+hooks:
+  - pre_tool_call
+  - post_tool_call

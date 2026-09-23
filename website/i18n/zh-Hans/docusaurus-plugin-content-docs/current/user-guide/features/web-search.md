@@ -1,6 +1,6 @@
 ---
 title: 网页搜索与提取
-description: 通过多个后端提供商搜索网页、提取页面内容并爬取网站——包括免费的自托管 SearXNG。
+description: 通过多个后端提供商搜索网页并提取页面内容——包括免费的自托管 SearXNG。
 sidebar_label: Web Search
 sidebar_position: 6
 ---
@@ -10,22 +10,22 @@ sidebar_position: 6
 Hermes Agent 内置两个可供模型调用的网页工具，由多个提供商支持：
 
 - **`web_search`** — 搜索网页并返回排序结果
-- **`web_extract`** — 从一个或多个 URL 获取并提取可读内容（当后端支持时内置深度爬取功能）
+- **`web_extract`** — 从一个或多个 URL 获取并提取可读内容
 
-两者均通过单一后端选择进行配置。提供商可通过 `hermes tools` 选择，或直接在 `config.yaml` 中设置。递归爬取功能（Firecrawl/Tavily）通过 `web_extract` 暴露，而非作为独立的 `web_crawl` 工具。
+两者均通过单一后端选择进行配置。提供商可通过 `hermes tools` 选择，或直接在 `config.yaml` 中设置。
 
 ## 后端
 
-| 提供商 | 环境变量 | 搜索 | 提取 | 爬取 | 免费层级 |
-|----------|---------|--------|---------|-------|-----------|
-| **Firecrawl**（默认） | `FIRECRAWL_API_KEY` | ✔ | ✔ | ✔ | 500 积分/月 |
-| **SearXNG** | `SEARXNG_URL` | ✔ | — | — | ✔ 免费（自托管） |
-| **Brave Search（免费层级）** | `BRAVE_SEARCH_API_KEY` | ✔ | — | — | 2 000 次查询/月 |
-| **DDGS (DuckDuckGo)** | —（无需密钥） | ✔ | — | — | ✔ 免费 |
-| **Tavily** | `TAVILY_API_KEY` | ✔ | ✔ | ✔ | 1 000 次搜索/月 |
-| **Exa** | `EXA_API_KEY` | ✔ | ✔ | — | 1 000 次搜索/月 |
-| **Parallel** | `PARALLEL_API_KEY` | ✔ | ✔ | — | 付费 |
-| **xAI (Grok)** | `XAI_API_KEY` 或 `hermes auth login xai-oauth` | ✔ | — | — | 付费（SuperGrok 或按 token 计费） |
+| 提供商 | 环境变量 | 搜索 | 提取 | 免费层级 |
+|----------|---------|--------|---------|-----------|
+| **Firecrawl**（默认） | `FIRECRAWL_API_KEY` | ✔ | ✔ | 500 积分/月 |
+| **SearXNG** | `SEARXNG_URL` | ✔ | — | ✔ 免费（自托管） |
+| **Brave Search（免费层级）** | `BRAVE_SEARCH_API_KEY` | ✔ | — | 2 000 次查询/月 |
+| **DDGS (DuckDuckGo)** | —（无需密钥） | ✔ | — | ✔ 免费 |
+| **Tavily** | `TAVILY_API_KEY` | ✔ | ✔ | 1 000 次搜索/月 |
+| **Exa** | `EXA_API_KEY` | ✔ | ✔ | 1 000 次搜索/月 |
+| **Parallel** | `PARALLEL_API_KEY` | ✔ | ✔ | 付费 |
+| **xAI (Grok)** | `XAI_API_KEY` 或 `hermes auth login xai-oauth` | ✔ | — | 付费（SuperGrok 或按 token 计费） |
 
 Brave Search、DDGS 和 xAI 均为**仅搜索**——如果同时需要 `web_extract`，可将其中任意一个与 Firecrawl/Tavily/Exa/Parallel 配合使用。DDGS 底层使用 [`ddgs` Python 包](https://pypi.org/project/ddgs/)；若尚未安装，请运行 `pip install ddgs`（或让 Hermes 在首次使用时懒加载安装）。xAI 通过 Responses API 运行 Grok 服务端的 `web_search` 工具——结果由 LLM 生成而非基于索引，因此标题、描述和 URL 选择均为模型输出（参见下方[信任模型说明](#xai-grok)）。
 
@@ -39,39 +39,19 @@ Brave Search、DDGS 和 xAI 均为**仅搜索**——如果同时需要 `web_ext
 
 ## `web_extract` 如何处理长页面
 
-后端返回的原始页面 markdown 可能非常庞大（论坛帖子、文档站点、带嵌入评论的新闻文章）。为保持上下文窗口可用并降低成本，`web_extract` 在将内容交给 agent 之前，会通过 **`web_extract` 辅助模型**对返回内容进行处理。行为完全由大小决定：
+后端返回的原始页面 markdown 可能非常庞大（论坛帖子、文档站点、带嵌入评论的新闻文章）。为保持上下文窗口可用，`web_extract` 采用**确定性字符预算** —— 不涉及任何 LLM 摘要：
 
 | 页面大小（字符数） | 处理方式 |
 |------------------------|--------------|
-| 5 000 以下 | 原样返回——不调用 LLM，完整 markdown 直达 agent |
-| 5 000 – 500 000 | 通过 `web_extract` 辅助模型单次摘要，输出上限约 5 000 字符 |
-| 500 000 – 2 000 000 | 分块处理：拆分为 10 万字符的块，并行摘要每块，再合成最终摘要（约 5 000 字符） |
-| 超过 2 000 000 | 拒绝处理，并提示使用带有针对性提取指令的 `web_crawl` 或更具体的来源 |
+| 预算以内（默认 15 000） | 原样返回 —— 完整 markdown 直达 agent |
+| 超出预算 | 头+尾窗口（约 75% 头部 / 25% 尾部，按 markdown 行边界切分），并附带明确的 `[TRUNCATED]` 尾注。完整的干净文本存储到磁盘，尾注告知 agent 文件路径以及分页读取被省略中间部分的确切 `read_file` 调用 |
+| 超过 2 000 000 | 存储的文本上限为 2 MB |
 
-摘要保留引用、代码块和关键事实的原始格式——它是内容压缩器，而非改写器。如果摘要失败或超时，Hermes 会回退到原始内容的前约 5 000 字符，而非返回无用的错误信息。
+每页预算可通过 `config.yaml` 中的 `web.extract_char_limit` 配置（默认 `15000`，范围限制在 2 000–500 000），agent 也可以通过工具的 `char_limit` 参数按调用提高。
 
-### 哪个模型负责摘要？
+### 当截断带来不便时
 
-`web_extract` 辅助任务。默认情况下（`auxiliary.web_extract.provider: "auto"`），使用您的**主聊天模型**——与 `hermes model` 相同的提供商和模型。对大多数配置而言这没问题，但在昂贵的推理模型（Opus、MiniMax M2.7 等）上，每次长页面提取都会产生可观的成本。
-
-若要将提取摘要路由到廉价快速的模型，无论主模型是什么：
-
-```yaml
-# ~/.hermes/config.yaml
-auxiliary:
-  web_extract:
-    provider: openrouter
-    model: google/gemini-3-flash-preview
-    timeout: 360       # 秒；如果遇到摘要超时，请调大此值
-```
-
-或交互式选择：`hermes model` → **Configure auxiliary models** → `web_extract`。
-
-完整参考和按任务覆盖模式，请参阅[辅助模型](/user-guide/configuration#auxiliary-models)。
-
-### 摘要处理不适用的情况
-
-如果您明确需要原始、未经摘要的页面内容——例如正在抓取结构化页面，LLM 摘要会丢失重要字段——请改用 `browser_navigate` + `browser_snapshot`。浏览器工具返回实时无障碍树，不经辅助模型改写（在超大页面上受其自身 8 000 字符快照上限约束）。
+如果您明确需要实时 DOM 而非提取的 markdown —— 例如提取内容很少的 JS 密集页面 —— 请改用 `browser_navigate` + `browser_snapshot`。浏览器工具返回实时无障碍树（超大页面受其自身快照上限约束）。
 
 ---
 
@@ -89,7 +69,7 @@ hermes tools
 
 ### Firecrawl（默认）
 
-功能完整的搜索、提取和爬取。推荐大多数用户使用。
+功能完整的搜索和提取。推荐大多数用户使用。
 
 ```bash
 # ~/.hermes/.env
@@ -113,7 +93,7 @@ FIRECRAWL_API_URL=http://localhost:3002
 
 SearXNG 是一个注重隐私的开源元搜索引擎，聚合来自 70 多个搜索引擎的结果。**无需 API 密钥**——只需将 Hermes 指向一个运行中的 SearXNG 实例。
 
-SearXNG 为**仅搜索**——`web_extract`（包括其爬取模式）需要单独的提取提供商。
+SearXNG 为**仅搜索**——`web_extract` 需要单独的提取提供商。
 
 #### 方案 A — 使用 Docker 自托管（推荐）
 
@@ -222,7 +202,7 @@ SEARXNG_URL=https://searx.example.com
 
 #### 将 SearXNG 与提取提供商配合使用
 
-SearXNG 负责搜索；`web_extract`（包括任何深度爬取模式）需要单独的提供商。使用按能力配置的键：
+SearXNG 负责搜索；`web_extract` 需要单独的提供商。使用按能力配置的键：
 
 ```yaml
 # ~/.hermes/config.yaml
@@ -237,7 +217,7 @@ web:
 
 ### Tavily
 
-针对 AI 优化的搜索、提取和爬取，免费层级慷慨。
+针对 AI 优化的搜索和提取，免费层级慷慨。
 
 ```bash
 # ~/.hermes/.env
@@ -305,7 +285,7 @@ web:
 web:
   backend: "xai"
   xai:
-    model: grok-4.3              # web_search 所需的推理模型（默认）
+    model: grok-build-0.1        # web_search 所需的推理模型（默认）
     allowed_domains:             # 可选，最多 5 个——与 excluded_domains 互斥
       - arxiv.org
     excluded_domains:            # 可选，最多 5 个
@@ -341,7 +321,7 @@ web:
 # ~/.hermes/config.yaml
 web:
   search_backend: "searxng"     # 由 web_search 使用
-  extract_backend: "firecrawl"  # 由 web_extract（及其深度爬取模式）使用
+  extract_backend: "firecrawl"  # 由 web_extract 使用
 ```
 
 当按能力键为空时，两者均回退到 `web.backend`。当 `web.backend` 也为空时，后端根据存在的 API 密钥/URL 自动检测。
@@ -421,13 +401,9 @@ web:
 
 切换到自托管实例（参见上方[方案 A](#option-a--self-host-with-docker-recommended)）。使用 Docker，您自己的实例没有速率限制。
 
-### `web_extract` 返回截断内容并附有"summarization timed out"提示
+### `web_extract` 返回截断内容并附有 `[TRUNCATED]` 尾注
 
-辅助模型未能在配置的超时时间内完成摘要。可以：
-
-- 在 `config.yaml` 中调大 `auxiliary.web_extract.timeout`（新安装默认 360 秒，若键缺失则为 30 秒）
-- 将 `web_extract` 辅助任务切换到更快的模型（例如 `google/gemini-3-flash-preview`）——参见 [`web_extract` 如何处理长页面](#how-web_extract-handles-long-pages)
-- 对于摘要处理不适用的页面，改用 `browser_navigate`
+对于超出字符预算的页面这是预期行为。尾注会给出保存完整干净文本的磁盘文件，以及分页读取被省略中间部分的确切 `read_file` 调用。若要内联查看更多内容，请在 `config.yaml` 中调大 `web.extract_char_limit`，或在调用时传入更大的 `char_limit`。
 
 ---
 

@@ -14,10 +14,8 @@ Sidebar is updated to nest all per-skill pages under Skills → Bundled / Option
 
 from __future__ import annotations
 import re
-import sys
 from collections import defaultdict
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 import yaml
@@ -33,7 +31,7 @@ SKILL_SOURCES = [
 
 # Pages the user had previously hand-written in user-guide/skills/.
 # We leave these alone (they get first-class sidebar treatment separately).
-HAND_WRITTEN = {"godmode.md", "google-workspace.md"}
+HAND_WRITTEN = {"google-workspace.md"}
 
 
 _FENCE_RE = re.compile(r"^(?P<indent>\s*)(?P<fence>```+|~~~+)", re.MULTILINE)
@@ -286,7 +284,7 @@ def derive_skill_meta(skill_path: Path, source_dir: Path, source_kind: str) -> d
     rel = skill_path.parent.relative_to(source_dir)
     parts = rel.parts
     if len(parts) == 1:
-        # Top-level skill (e.g. skills/dogfood/SKILL.md) -- rare
+        # Top-level skill (e.g. skills/<name>/SKILL.md with no category) -- rare
         category = parts[0]
         sub = None
         slug = parts[0]
@@ -335,7 +333,7 @@ def render_skill_page(
 ) -> str:
     name = fm.get("name", meta["slug"])
     description = fm.get("description", "").strip()
-    short_desc = description.split(".")[0].strip() if description else name
+    short_desc = re.split(r"\.(?:\s|$)", description, maxsplit=1)[0].strip() if description else name
     if len(short_desc) > 160:
         short_desc = short_desc[:157] + "..."
 
@@ -397,9 +395,10 @@ def render_skill_page(
             if skill_index is not None:
                 target_meta = skill_index.get(r)
             if target_meta is not None:
+                # Relative file link: resolves on the site and on GitHub (#114428).
                 href = (
-                    f"/docs/user-guide/skills/{target_meta['source_kind']}"
-                    f"/{target_meta['category']}/{page_id(target_meta)}"
+                    f"../../{target_meta['source_kind']}"
+                    f"/{target_meta['category']}/{page_id(target_meta)}.md"
                 )
                 link_parts.append(f"[`{r}`]({href})")
             else:
@@ -497,7 +496,7 @@ def build_catalog_md_bundled(entries: list[tuple[dict[str, Any], dict[str, Any]]
             desc = (fm.get("description") or "").strip()
             if len(desc) > 240:
                 desc = desc[:237].rstrip() + "..."
-            link_target = f"/docs/user-guide/skills/bundled/{meta['category']}/{page_id(meta)}"
+            link_target = f"../user-guide/skills/bundled/{meta['category']}/{page_id(meta)}.md"
             path = f"`{meta['rel_path']}`"
             desc_esc = mdx_escape_body(desc).replace("|", "\\|").replace("\n", " ")
             lines.append(
@@ -558,7 +557,7 @@ def build_catalog_md_optional(entries: list[tuple[dict[str, Any], dict[str, Any]
             desc = (fm.get("description") or "").strip()
             if len(desc) > 240:
                 desc = desc[:237].rstrip() + "..."
-            link_target = f"/docs/user-guide/skills/optional/{meta['category']}/{page_id(meta)}"
+            link_target = f"../user-guide/skills/optional/{meta['category']}/{page_id(meta)}.md"
             desc_esc = mdx_escape_body(desc).replace("|", "\\|").replace("\n", " ")
             lines.append(f"| [**{name}**]({link_target}) | {desc_esc} |")
         lines.append("")
@@ -585,7 +584,7 @@ def build_sidebar_items(entries: list[tuple[dict[str, Any], dict[str, Any]]]) ->
 
     Structure:
     Skills
-    ├── (hand-written pages first: godmode, google-workspace)
+    ├── (hand-written pages first: google-workspace)
     ├── Bundled
     │   ├── apple
     │   │   ├── apple-apple-notes
