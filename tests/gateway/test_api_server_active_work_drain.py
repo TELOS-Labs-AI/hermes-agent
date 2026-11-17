@@ -10,6 +10,7 @@ turns once the gateway starts draining.
 import asyncio
 import hashlib
 import os
+import sys
 import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -138,12 +139,16 @@ class TestDrainWaitsForApiWork:
 
         # The patch target is the shared asyncio module, so aiohttp's own tasks
         # (aiohttp >= 3.14.5 spawns its request handler with asyncio.create_task)
-        # arrive here too. Delay only coroutines defined in gateway/platforms/.
-        gateway_platforms = os.sep + os.path.join("gateway", "platforms") + os.sep
+        # arrive here too. Delay only coroutines defined in the API server's
+        # own modules (the /v1/runs task is _execute_run in api_server_runs.py).
+        api_modules = {
+            os.path.realpath(module.__file__)
+            for module in (sys.modules[APIServerAdapter.__module__], _api_runs)
+        }
 
         def delayed_create_task(coro, **kwargs):
             code = getattr(coro, "cr_code", None)
-            if code is None or gateway_platforms not in code.co_filename:
+            if code is None or os.path.realpath(code.co_filename) not in api_modules:
                 return original_create_task(coro, **kwargs)
 
             async def delayed():
@@ -151,7 +156,7 @@ class TestDrainWaitsForApiWork:
                 await allow_task.wait()
                 return await coro
 
-            return original_create_task(delayed())
+            return original_create_task(delayed(), **kwargs)
 
         mock_agent = MagicMock()
         mock_agent.run_conversation.return_value = {"final_response": "done"}
