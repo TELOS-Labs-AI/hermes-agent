@@ -293,3 +293,9 @@ def test_degraded_scorer_never_gates_the_tool_call_through_the_host_resolver(mon
     monkeypatch.setattr(plugin, "_SCORER", broken_scorer)
     monkeypatch.setattr(plugin, "_SCORER_LOADED", True)
     _assert_tool_call_proceeds(plugin, monkeypatch, tool_name="write_file", args={"path": "x"}, tool_call_id="g1")
+
+
+def test_manifest_names_telos_as_author():
+    # The plugin is TELOS work on this fork, not NousResearch's.
+    data = yaml.safe_load((PLUGIN_DIR / "plugin.yaml").read_text(encoding="utf-8"))
+    assert data["author"] == "TELOS AI Labs"
